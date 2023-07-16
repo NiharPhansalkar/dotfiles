@@ -751,6 +751,8 @@ main()
         unset MANPATH
     fi
 
+    alias serve="browser-sync start --server --files ." 
+
     return 0
 }
 
