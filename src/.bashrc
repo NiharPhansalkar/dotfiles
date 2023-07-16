@@ -535,6 +535,8 @@ main()
     # Colours for `tree`
     source <(dircolors -b)
 
+    alias serve="browser-sync start --server --files ." 
+
     return 0
 }
 

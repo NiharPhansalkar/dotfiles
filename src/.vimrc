@@ -1,9 +1,14 @@
 vim9script
 set nocompatible
+set relativenumber
+set number
 
 # Plugin Config
     call plug#begin()
         Plug 'APZelos/blamer.nvim'
+        Plug 'neoclide/coc.nvim', {'branch': 'release'}
+        Plug 'morhetz/gruvbox'
+        Plug 'mattn/emmet-vim'
         Plug 'airblade/vim-gitgutter'
         Plug 'dense-analysis/ale'
         Plug 'godlygeek/tabular'
@@ -55,6 +60,16 @@ set nocompatible
 
     highlight Blamer ctermfg=lightgray
 # End of Plugin Config
+
+# Config for gruvbox dark theme 
+autocmd vimenter * ++nested colorscheme gruvbox
+set termguicolors
+# end of gruvbox config
+
+# COC autocomplete
+# # use <TAB>for trigger completion
+inoremap <silent><expr> <TAB> coc#pum#visible() ? coc#pum#confirm() : "\<C-g>u\<TAB>"
+# end of trigger completion
 
 syntax on
 filetype plugin indent on

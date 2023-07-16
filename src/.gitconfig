@@ -36,6 +36,6 @@
 [receive]
     denyCurrentBranch = updateInstead
 [user]
-    email = contact@ankitpati.in
-    name = Ankit Pati
+    email = phansalkarnihar@gmail.com
+    name = Nihar Phansalkar
     signingkey = B8BBCEBCBD6C4BF0599C40F9360A96429F7A69DC
