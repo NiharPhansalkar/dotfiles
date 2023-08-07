@@ -2,22 +2,58 @@
 
 sanitize_path()
 {
-    # Utility function to sanitize PATH-like specifications.
-    # Do not allow
-    # 1. repeated elements,
-    # 2. repeated, starting, or ending `:`, and
-    # 3. repeated `/`.
-    printf '%s' "$1" \
-        | sed 's/::*/:/g;s/^://;s_//*_/_g' \
-        | awk -v 'RS=:' -v 'ORS=:' '!seen[$0]++' \
-        | sed 's/:$//' \
-    ;
+    local -n input=$1
+    local IFS=':'
+    local -a paths
+
+    # remove repeated or ending '/'
+    input=${input//\/+(\/)//}
+    input=${input%/}
+    input=${input//\/:/:}
+
+    read -ra paths <<< "$input"
+
+    local -A paths_map
+    local -a sanitized_paths
+
+    local path
+    for path in "${paths[@]}"
+    do
+        if [[ -z $path ]]
+        then
+            # remove repeated, starting, or ending `:`
+            continue
+        fi
+
+        # remove repeated elements
+        if [[ ! -v paths_map[$path] ]]
+        then
+            paths_map[$path]=1
+            sanitized_paths+=("$path")
+        fi
+    done
+
+    input=${sanitized_paths[*]}
+}
+
+discolour_enclosed_ansi()
+{
+    # Utility function to remove ANSI colours from strings with correctly
+    # enclosed colours.
+    #
+    # Enclosing should be as Bash expects for `PS1`:
+    #  ^A (`\[` or `$'\001'`) to start colour codes,
+    #  ^B (`\]` or `$'\002'`) to end colour codes.
+
+    local -n coloured_enclosed_ansi=$1
+    coloured_enclosed_ansi=${coloured_enclosed_ansi//$'\001'*([^$'\002'])$'\002'}
 }
 
 # Prepend old binaries to PATH
 B-oldbin()
 {
-    export PATH="$(sanitize_path "$HOME/oldbin:$PATH")"
+    PATH="$HOME/oldbin:$PATH"
+    sanitize_path PATH
     hash -r
 }
 
@@ -28,7 +64,7 @@ add_brewed_items_to_env()
         return
     fi
 
-    if [[ $(uname -s) == 'Linux' ]]
+    if [[ $OSTYPE == *linux* ]]
     then
         # Completion for brewed binaries
         local completions_dir="$brew_prefix/etc/bash_completion.d"
@@ -40,7 +76,7 @@ add_brewed_items_to_env()
                 source "$completion_file"
             done
         fi
-    elif [[ $(uname -s) == 'Darwin' ]]
+    elif [[ $OSTYPE == *darwin* ]]
     then
         local brew_postgresql_latest_formula=("$(brew formulae | grep '^postgresql@' | sort -rV | head -n 1)")
         if [[ -z ${brew_postgresql_latest_formula[0]} ]]
@@ -174,21 +210,21 @@ add_brewed_items_to_env()
             extra_binaries="$brewsbinpath:$extra_binaries"
         fi
 
-        if [[ $(id -u) != '0' ]]
+        if ((UID != 0))
         then
-            local oraclepath="$ORACLE_HOME"
+            local oraclepath=$ORACLE_HOME
             if [[ -d $oraclepath ]]
             then
                 extra_binaries="$oraclepath:$extra_binaries"
             fi
 
-            local oracledyldpath="$ORACLE_HOME"
+            local oracledyldpath=$ORACLE_HOME
             if [[ -d $oracledyldpath ]]
             then
                 extra_dyldpath="$oracledyldpath:$extra_dyldpath"
             fi
 
-            local oracleclaspath="$ORACLE_HOME"
+            local oracleclaspath=$ORACLE_HOME
             if [[ -d $oracleclaspath ]]
             then
                 extra_claspath="$oracleclaspath:$extra_claspath"
@@ -214,7 +250,7 @@ add_brewed_items_to_env()
         fi
 
         # Clean and export the fruits of the above labour
-        if [[ $(id -u) == '0' ]]
+        if ((UID == 0))
         then
             local admin_user_home='/Users/ankitpati'
             local extra_binaries="$admin_user_home/bin:$admin_user_home/.local/bin:$extra_binaries"
@@ -223,14 +259,19 @@ add_brewed_items_to_env()
             local extra_manpages="$admin_user_home/man:$admin_user_home/.local/share/man:$extra_manpages"
         fi
 
-        export CLASSPATH="$(sanitize_path "$extra_claspath:$CLASSPATH")"
-        export DYLD_LIBRARY_PATH="$(sanitize_path "$extra_dyldpath:$DYLD_LIBRARY_PATH")"
-        export MANPATH="$(sanitize_path "$extra_manpages:$MANPATH")"
-        export PATH="$(sanitize_path "$extra_binaries:$PATH")"
-        export PKG_CONFIG_PATH="$(sanitize_path "$extra_pkgpaths:$PKG_CONFIG_PATH")"
+        CLASSPATH="$extra_claspath:$CLASSPATH"
+        sanitize_path CLASSPATH
+        DYLD_LIBRARY_PATH="$extra_dyldpath:$DYLD_LIBRARY_PATH"
+        sanitize_path DYLD_LIBRARY_PATH
+        MANPATH="$extra_manpages:$MANPATH"
+        sanitize_path MANPATH
+        PATH="$extra_binaries:$PATH"
+        sanitize_path PATH
+        PKG_CONFIG_PATH="$extra_pkgpaths:$PKG_CONFIG_PATH"
+        sanitize_path PKG_CONFIG_PATH
 
         # Google Cloud SDK
-        if [[ $(id -u) != '0' ]]
+        if ((UID != 0))
         then
             local gcloud_sdk="$brew_prefix/Caskroom/google-cloud-sdk/latest/google-cloud-sdk"
             if [[ -f $gcloud_sdk/path.bash.inc ]]
@@ -252,11 +293,28 @@ add_brewed_items_to_env()
     fi
 }
 
+set_red_if_failed()
+{
+    local exit_code=$?
+    local should_print_code=$1
+
+    local bright_red='\001\e[91m\002'
+
+    if ((exit_code != 0))
+    then
+        printf '%b' "$bright_red"
+    fi
+
+    if ((should_print_code == 1))
+    then
+        printf '%03u' "$exit_code"
+    fi
+}
+
 setup_prompt()
 {
     local clear_format='\[\e[m\]'
     local bright_green='\[\e[92m\]'
-    local bright_red='\[\e[91m\]'
     local dark_cyan='\[\e[36m\]'
     local dark_magenta='\[\e[35m\]'
     local dark_yellow='\[\e[33m\]'
@@ -265,7 +323,7 @@ setup_prompt()
     local bright_yellow='\[\e[93m\]'
     local dark_blue='\[\e[34m\]'
 
-    local exit_code="$bright_green"'$(e=$?; if ((e != 0)); then printf '"$bright_red"'; fi; printf %03u $e)'
+    local exit_code="$bright_green"'$(set_red_if_failed 1)'
 
     local year="$dark_cyan"'\D{%Y}'
     local month="$dark_magenta"'\D{%m}'
@@ -279,42 +337,105 @@ setup_prompt()
 
     local situation='\u@\h \w'
     local euid_indicator='\$'
+    local coloured_euid_indicator="$bright_green"'$(set_red_if_failed 0)\$'"$clear_format"
 
-    readonly LONG_PROMPT_LEGROOM='10'
+    readonly PROMPT_LEGROOM=10
 
     readonly LONG_COMMON_PROMPT="$clear_format$exit_code $long_timestamp$clear_format"
     readonly SHORT_COMMON_PROMPT="$clear_format$exit_code $short_timestamp$clear_format"
+    readonly SHORTEST_COMMON_PROMPT="$clear_format"
 
     readonly LONG_PROMPT="$LONG_COMMON_PROMPT $situation $euid_indicator "
     readonly SHORT_PROMPT="$SHORT_COMMON_PROMPT $euid_indicator "
+    readonly SHORTEST_PROMPT="$SHORTEST_COMMON_PROMPT$coloured_euid_indicator "
 }
 
 set_prompt()
 {
-    local long_prompt="$LONG_PROMPT"
-    local short_prompt="$SHORT_PROMPT"
+    local max_prompt_length=$((COLUMNS - PROMPT_LEGROOM))
+    local long_prompt=$LONG_PROMPT
+    local short_prompt=$SHORT_PROMPT
+    local shortest_prompt=$SHORTEST_PROMPT
 
     # For `git-sh`. Set `ADD_ON_PS1` in `~/.gitshrc`.
     if [[ -n $ADD_ON_PS1 ]]
     then
         long_prompt="$LONG_COMMON_PROMPT $ADD_ON_PS1"
         short_prompt="$SHORT_COMMON_PROMPT $ADD_ON_PS1"
+        shortest_prompt="$SHORTEST_COMMON_PROMPT$ADD_ON_PS1"
     fi
 
-    local expanded_long_prompt="${long_prompt@P}"
-    local discoloured_expanded_long_prompt="${expanded_long_prompt//$'\001'*([^$'\002'])$'\002'}"
+    local expanded_long_prompt=${long_prompt@P}
+    discolour_enclosed_ansi expanded_long_prompt
 
-    if ((${#discoloured_expanded_long_prompt} <= COLUMNS - LONG_PROMPT_LEGROOM))
+    if ((${#expanded_long_prompt} <= max_prompt_length))
     then
-        PS1="$long_prompt"
+        PS1=$long_prompt
     else
-        PS1="$short_prompt"
+        local expanded_short_prompt=${short_prompt@P}
+        discolour_enclosed_ansi expanded_short_prompt
+
+        if ((${#expanded_short_prompt} <= max_prompt_length))
+        then
+            PS1=$short_prompt
+        else
+            PS1=$shortest_prompt
+        fi
     fi
 }
 
 main()
 {
-    if [[ $(uname -s) == 'Darwin' && $(id -u) == '0' ]]
+    if [[ -n $BASHRC_MAIN_SOURCED ]]
+    then
+        return 0
+    fi
+
+    readonly BASHRC_MAIN_SOURCED=1
+
+    export \
+        ANDROID_HOME \
+        CLASSPATH \
+        DOCKER_HOST \
+        DOTNET_CLI_TELEMETRY_OPTOUT \
+        DYLD_LIBRARY_PATH \
+        EDITOR \
+        GH_HOST \
+        HOMEBREW_BAT \
+        HOMEBREW_NO_ANALYTICS \
+        HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK \
+        HOMEBREW_NO_INSECURE_REDIRECT \
+        JAVA_HOME \
+        MANPATH \
+        MAN_POSIXLY_CORRECT \
+        MERGE \
+        MYPYPATH \
+        MYPY_CACHE_DIR \
+        NEXUS_PASSWORD \
+        NEXUS_URL \
+        NEXUS_USERNAME \
+        NPM_PACKAGES \
+        ORACLE_HOME \
+        PERL5LIB \
+        PERLBREW_CPAN_MIRROR \
+        PERLCRITIC \
+        PERL_CPANM_OPT \
+        PERL_LOCAL_LIB_ROOT \
+        PERL_MB_OPT \
+        PERL_MM_OPT \
+        PGSSLMODE \
+        PKG_CONFIG_PATH \
+        POWERSHELL_TELEMETRY_OPTOUT \
+        PYENV_ROOT \
+        RIPGREP_CONFIG_PATH \
+        RLWRAP_EDITOR \
+        RLWRAP_HOME \
+        SDKMAN_DIR \
+        SRC_DISABLE_USER_AGENT_TELEMETRY \
+        SRC_ENDPOINT \
+    ;
+
+    if [[ $OSTYPE == *darwin* && $UID == 0 ]]
     then
         # Clear out `$PATH` before sourcing `/etc/profile` for root.
         #
@@ -324,13 +445,6 @@ main()
         # shellcheck disable=SC2123
         PATH=''
     fi
-
-    if [[ -n $BASHRC_MAIN_SOURCED ]]
-    then
-        return 0
-    fi
-
-    readonly BASHRC_MAIN_SOURCED='1'
 
     # Source global definitions
     local global_profile='/etc/profile'
@@ -342,27 +456,30 @@ main()
 
     mesg n || :
 
-    if [[ $(uname -s) == 'Linux' ]]
+    if [[ $OSTYPE == *linux* ]]
     then
-        export PATH="$(sanitize_path "/home/linuxbrew/.linuxbrew/bin:$PATH")"
+        PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+        sanitize_path PATH
     fi
 
-    local brew_prefix="$(command -v brew &>/dev/null && brew --prefix)"
+    local brew_prefix=$(command -v brew &>/dev/null && brew --prefix)
 
     # Ensure `source`s below this see the correct `$MANPATH`.
-    local manpath="$MANPATH"
+    local manpath=$MANPATH
     unset MANPATH
-    export MANPATH="$(sanitize_path "$manpath:$(manpath)")"
+    export MANPATH
+    MANPATH="$manpath:$(manpath)"
+    sanitize_path MANPATH
 
     # Text editors
-    export EDITOR='vim'
-    export MERGE='vimdiff'
+    EDITOR='vim'
+    MERGE='vimdiff'
 
     # Telemetry
-    export DOTNET_CLI_TELEMETRY_OPTOUT='1'
-    export HOMEBREW_NO_ANALYTICS='1'
-    export POWERSHELL_TELEMETRY_OPTOUT='1'
-    export SRC_DISABLE_USER_AGENT_TELEMETRY='1'
+    DOTNET_CLI_TELEMETRY_OPTOUT=1
+    HOMEBREW_NO_ANALYTICS=1
+    POWERSHELL_TELEMETRY_OPTOUT=1
+    SRC_DISABLE_USER_AGENT_TELEMETRY=1
 
     # History configuration
     shopt -s histappend
@@ -370,71 +487,73 @@ main()
     HISTCONTROL='ignoreboth'
     HISTFILESIZE=''
     HISTSIZE=''
-    if ! printf '%s\n' "$PROMPT_COMMAND" | grep -q '\bhistory\b'
+    if [[ $PROMPT_COMMAND != *history* ]]
     then
-        PROMPT_COMMAND="$(printf 'history -a; history -n; set_prompt; %s\n' "$PROMPT_COMMAND" \
-                          | sed 's/__vte_prompt_command//g')"
+        local prompt_command="history -a; history -n; set_prompt; $PROMPT_COMMAND"
+        PROMPT_COMMAND=${prompt_command//__vte_prompt_command}
     fi
 
     # Brew Prevent Time-Consuming Activities
-    export HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK='1'
+    HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK=1
 
     # Secure Brew
-    export HOMEBREW_NO_INSECURE_REDIRECT='1'
+    HOMEBREW_NO_INSECURE_REDIRECT=1
 
     # Syntax-highlighted Brew Output
-    export HOMEBREW_BAT='1'
+    HOMEBREW_BAT=1
 
     # RLWrap
-    export RLWRAP_EDITOR="vim '+call cursor(%L,%C)'"
-    export RLWRAP_HOME="$HOME/.rlwrap"
+    RLWRAP_EDITOR="vim '+call cursor(%L,%C)'"
+    RLWRAP_HOME="$HOME/.rlwrap"
 
     # ripgrep
-    export RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
+    RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
 
     # Oracle Database
-    if [[ $(uname -s) == 'Darwin' ]]
+    if [[ $OSTYPE == *darwin* ]]
     then
         local instantclient="$(brew --prefix)/Cellar/instantclient-basic"
 
         # shellcheck disable=2012
-        export ORACLE_HOME="$instantclient/$(ls -vr "$instantclient" | head -1)/"
+        ORACLE_HOME="$instantclient/$(ls -vr "$instantclient" | head -1)/"
     fi
 
     # PostgreSQL
-    export PGSSLMODE='verify-full'
+    PGSSLMODE='verify-full'
 
     # SDKMAN!
-    export SDKMAN_DIR="$HOME/.sdkman/"
+    SDKMAN_DIR="$HOME/.sdkman/"
 
     # Android
-    export ANDROID_HOME="$HOME/Android/Sdk/"
+    ANDROID_HOME="$HOME/Android/Sdk/"
 
     # NPM
-    export NPM_PACKAGES="$HOME/.npm/packages/"
+    NPM_PACKAGES="$HOME/.npm/packages/"
 
     # Python
-    export MYPYPATH="$HOME/.mypy_stubs/"
-    export MYPY_CACHE_DIR="$HOME/.mypy_cache/"
-    export PYENV_ROOT="$HOME/.pyenv/"
+    MYPYPATH="$HOME/.mypy_stubs/"
+    MYPY_CACHE_DIR="$HOME/.mypy_cache/"
+    PYENV_ROOT="$HOME/.pyenv/"
 
     # Perl
-    export PERL5LIB="$(sanitize_path "$HOME/perl5/lib/perl5:$PERL5LIB")"
-    export PERLBREW_CPAN_MIRROR='https://www.cpan.org/'
-    export PERLCRITIC="$HOME/.perlcriticrc"
-    export PERL_CPANM_OPT='--from https://www.cpan.org/ --verify'
-    export PERL_LOCAL_LIB_ROOT="$(sanitize_path "$HOME/perl5:$PERL_LOCAL_LIB_ROOT")"
-    export PERL_MB_OPT="--install_base '$HOME/perl5'"
-    export PERL_MM_OPT="INSTALL_BASE=$HOME/perl5"
+    PERL5LIB="$HOME/perl5/lib/perl5:$PERL5LIB"
+    sanitize_path PERL5LIB
+    PERLBREW_CPAN_MIRROR='https://www.cpan.org/'
+    PERLCRITIC="$HOME/.perlcriticrc"
+    PERL_CPANM_OPT='--from https://www.cpan.org/ --verify'
+    PERL_LOCAL_LIB_ROOT="$HOME/perl5:$PERL_LOCAL_LIB_ROOT"
+    sanitize_path PERL_LOCAL_LIB_ROOT
+    PERL_MB_OPT="--install_base '$HOME/perl5'"
+    PERL_MM_OPT="INSTALL_BASE=$HOME/perl5"
 
     # Podman
     if command -v podman &>/dev/null && [[ -n $XDG_RUNTIME_DIR ]]
     then
-        export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
+        DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
     fi
 
     # No `man` Prompts on Namesake Pages
-    export MAN_POSIXLY_CORRECT='1'
+    MAN_POSIXLY_CORRECT=1
 
     alias chomp='perl -pi -E "chomp if eof"'
     alias cpan-outdated='cpan-outdated --mirror="$PERLBREW_CPAN_MIRROR"'
@@ -465,10 +584,7 @@ main()
     unset -f setup_prompt
     set_prompt
 
-    # Bash
-    export -f sanitize_path
-
-    if [[ $(id -u) != '0' ]]
+    if ((UID != 0))
     then
         # pyenv
         if [[ -d $PYENV_ROOT ]]
@@ -484,21 +600,27 @@ main()
         fi
 
         # Perl local::lib
-        export PATH="$(sanitize_path "$HOME/perl5/bin:$PATH")"
-        export MANPATH="$(sanitize_path "$HOME/perl5/man:$MANPATH")"
+        PATH="$HOME/perl5/bin:$PATH"
+        sanitize_path PATH
+        MANPATH="$HOME/perl5/man:$MANPATH"
+        sanitize_path MANPATH
 
         # Cargo
-        export PATH="$(sanitize_path "$HOME/.cargo/bin:$PATH")"
+        PATH="$HOME/.cargo/bin:$PATH"
+        sanitize_path PATH
 
         # Go
-        export PATH="$(sanitize_path "$HOME/go/bin:$PATH")"
+        PATH="$HOME/go/bin:$PATH"
+        sanitize_path PATH
 
         # Composer
-        export PATH="$(sanitize_path "$HOME/.composer/vendor/bin:$PATH")"
+        PATH="$HOME/.composer/vendor/bin:$PATH"
+        sanitize_path PATH
 
         # NPM
         #npm config set prefix "$NPM_PACKAGES"
-        export PATH="$(sanitize_path "$NPM_PACKAGES/bin:$PATH")"
+        PATH="$NPM_PACKAGES/bin:$PATH"
+        sanitize_path PATH
 
         # SDKMAN!
         local sdkman_init="$SDKMAN_DIR/bin/sdkman-init.sh"
@@ -512,24 +634,32 @@ main()
         if [[ -n $(ls "$ruby_gems" 2>/dev/null) ]]
         then
             # shellcheck disable=2012
-            export PATH="$(sanitize_path "$ruby_gems/$(ls -vr "$ruby_gems" | head -1)/bin:$PATH")"
+            PATH="$ruby_gems/$(ls -vr "$ruby_gems" | head -1)/bin:$PATH"
+            sanitize_path PATH
         fi
 
         # .NET
-        export PATH="$(sanitize_path "$HOME/.dotnet/tools:$PATH")"
+        PATH="$HOME/.dotnet/tools:$PATH"
+        sanitize_path PATH
 
         # Android
-        export PATH="$(sanitize_path "$HOME/Android/Sdk/platform-tools:$PATH")"
+        PATH="$HOME/Android/Sdk/platform-tools:$PATH"
+        sanitize_path PATH
 
         # User-installed tools
-        export CLASSPATH="$(sanitize_path "$HOME/jar:$HOME/.local/jar:$CLASSPATH")"
-        if [[ $(uname -s) == 'Darwin' ]]
+        CLASSPATH="$HOME/jar:$HOME/.local/jar:$CLASSPATH"
+        sanitize_path CLASSPATH
+        if [[ $OSTYPE == *darwin* ]]
         then
-            export DYLD_LIBRARY_PATH="$(sanitize_path "$HOME/lib:$HOME/.local/lib:$DYLD_LIBRARY_PATH")"
+            DYLD_LIBRARY_PATH="$HOME/lib:$HOME/.local/lib:$DYLD_LIBRARY_PATH"
+            sanitize_path DYLD_LIBRARY_PATH
         fi
-        export MANPATH="$(sanitize_path "$HOME/man:$HOME/.local/share/man:$MANPATH")"
-        export PATH="$(sanitize_path "$HOME/bin:$HOME/.local/bin:$PATH")"
-        export PERL5LIB="$(sanitize_path "$HOME/lib/perl5:$HOME/.local/lib/perl5:$PERL5LIB")"
+        MANPATH="$HOME/man:$HOME/.local/share/man:$MANPATH"
+        sanitize_path MANPATH
+        PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+        sanitize_path PATH
+        PERL5LIB="$HOME/lib/perl5:$HOME/.local/lib/perl5:$PERL5LIB"
+        sanitize_path PERL5LIB
     fi
 
     # Colours for `tree`
