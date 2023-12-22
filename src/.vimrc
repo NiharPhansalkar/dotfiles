@@ -42,7 +42,8 @@ set number
         yaml:       ['prettier'          ],
     }
     g:ale_linters_ignore = {
-        java: ['checkstyle'],
+        java:   ['checkstyle'],
+        python: ['pyright'   ],
     }
 
     g:ale_java_google_java_format_options = '--aosp'
