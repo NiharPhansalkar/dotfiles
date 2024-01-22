@@ -35,6 +35,7 @@ set number
         markdown:   ['prettier'          ],
         perl:       ['perltidy'          ],
         python:     ['isort', 'black'    ],
+        ruby:       ['prettier'          ],
         sh:         ['shfmt'             ],
         terraform:  ['terraform'         ],
         typescript: ['prettier'          ],
@@ -49,6 +50,7 @@ set number
     g:ale_java_google_java_format_options = '--aosp'
     g:ale_json_jq_options = '-S --indent 4'
     g:ale_python_flake8_options = '--ignore=E501'
+    g:ale_python_isort_options = '--profile=black'
     g:ale_python_ruff_options = '--ignore=E501'
     g:ale_sql_sqlfluff_options = '--dialect postgres'
     g:ale_virtualtext_cursor = 'disabled'
